@@ -96,6 +96,7 @@ const uint8_t PROGMEM ledmap[][RGB_MATRIX_LED_COUNT][3] = {
 
 #ifdef RGB_MATRIX_ENABLE
 #include "timer.h"
+#include <math.h>
 
 static inline uint8_t scale8(uint8_t i, uint8_t s) {
     return (uint8_t)(((uint16_t)i * (uint16_t)s) >> 8);
