@@ -94,6 +94,63 @@ const uint8_t PROGMEM ledmap[][RGB_MATRIX_LED_COUNT][3] = {
 
 };
 
+#ifdef RGB_MATRIX_ENABLE
+#include "timer.h"
+
+// --- Tunables ---
+#define BLUE_HUE 200      // ~cyan/blue; change if you want a different counter-color
+#define BLUE_SAT 255
+#define MIN_V     20      // brightness floor (0–255)
+#define MAX_V    200      // brightness ceiling (<= 255)
+#define SPEED_SH  3       // phase = timer_read() >> SPEED_SH ; bigger = slower
+
+// Detect whether LED i is one of your “orange” keys as defined in ledmap[0]
+static inline bool is_orange_led(uint8_t i) {
+    uint8_t h = pgm_read_byte(&ledmap[0][i][0]);
+    uint8_t s = pgm_read_byte(&ledmap[0][i][1]);
+    uint8_t v = pgm_read_byte(&ledmap[0][i][2]);
+    // Your orange entries are {12,224,255}; allow exact H match and nonzero S/V
+    return (h == 12) && (s != 0) && (v != 0);
+}
+
+// Map 0..255 -> MIN_V..MAX_V
+static inline uint8_t wave_to_v(uint8_t w) {
+    uint8_t span = (MAX_V > MIN_V) ? (MAX_V - MIN_V) : 0;
+    return MIN_V + scale8(w, span);
+}
+
+static void checkerboard_breath(void) {
+    uint16_t phase = timer_read() >> SPEED_SH;
+
+    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+        // Optional: skip logos/underglow if present
+        if (!HAS_FLAGS(g_led_config.flags[i], LED_FLAG_KEYLIGHT)) continue;
+
+        bool orange = is_orange_led(i);
+
+        // Anti-phase breathing: orange uses phase, blue uses phase+π
+        uint8_t w = sin8(phase + (orange ? 0 : 128));
+        uint8_t v = wave_to_v(w);
+
+        HSV hsv;
+        if (orange) {
+            // Keep your exact orange from ledmap[0]
+            hsv.h = pgm_read_byte(&ledmap[0][i][0]); // 12
+            hsv.s = pgm_read_byte(&ledmap[0][i][1]); // 224
+        } else {
+            // Non-orange keys breathe in blue
+            hsv.h = BLUE_HUE;
+            hsv.s = BLUE_SAT;
+        }
+        hsv.v = v;
+
+        // Respect global brightness: reuse your helper
+        RGB rgb = hsv_to_rgb_with_value(hsv);
+        rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+}
+#endif
+
 void set_layer_color(int layer) {
   for (int i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
     HSV hsv = {
@@ -110,42 +167,79 @@ void set_layer_color(int layer) {
   }
 }
 
+// bool rgb_matrix_indicators_user(void) {
+//   if (rawhid_state.rgb_control) {
+//       return false;
+//   }
+//   if (!keyboard_config.disable_layer_led) { 
+//     switch (biton32(layer_state)) {
+//       case 0:
+//         set_layer_color(0);
+//         break;
+//       case 1:
+//         set_layer_color(1);
+//         break;
+//       case 2:
+//         set_layer_color(2);
+//         break;
+//       case 3:
+//         set_layer_color(3);
+//         break;
+//       case 4:
+//         set_layer_color(4);
+//         break;
+//       case 5:
+//         set_layer_color(5);
+//         break;
+//      default:
+//         if (rgb_matrix_get_flags() == LED_FLAG_NONE) {
+//           rgb_matrix_set_color_all(0, 0, 0);
+//         }
+//     }
+//   } else {
+//     if (rgb_matrix_get_flags() == LED_FLAG_NONE) {
+//       rgb_matrix_set_color_all(0, 0, 0);
+//     }
+//   }
+//
+//   return true;
+// }
+
 bool rgb_matrix_indicators_user(void) {
-  if (rawhid_state.rgb_control) {
-      return false;
-  }
-  if (!keyboard_config.disable_layer_led) { 
-    switch (biton32(layer_state)) {
-      case 0:
-        set_layer_color(0);
-        break;
-      case 1:
-        set_layer_color(1);
-        break;
-      case 2:
-        set_layer_color(2);
-        break;
-      case 3:
-        set_layer_color(3);
-        break;
-      case 4:
-        set_layer_color(4);
-        break;
-      case 5:
-        set_layer_color(5);
-        break;
-     default:
+    if (rawhid_state.rgb_control) {
+        return false;
+    }
+
+    uint8_t layer = biton32(layer_state);
+
+    // Our custom animation only on base layer; keep your previous per-layer colors elsewhere
+    if (layer == 0) {
+    #ifdef RGB_MATRIX_ENABLE
+        checkerboard_breath();
+        return true;
+    #else
+        return false;
+    #endif
+    }
+
+    if (!keyboard_config.disable_layer_led) {
+        switch (layer) {
+            case 1: set_layer_color(1); break;
+            case 2: set_layer_color(2); break;
+            case 3: set_layer_color(3); break;
+            case 4: set_layer_color(4); break;
+            case 5: set_layer_color(5); break;
+            default:
+                if (rgb_matrix_get_flags() == LED_FLAG_NONE) {
+                    rgb_matrix_set_color_all(0, 0, 0);
+                }
+        }
+    } else {
         if (rgb_matrix_get_flags() == LED_FLAG_NONE) {
-          rgb_matrix_set_color_all(0, 0, 0);
+            rgb_matrix_set_color_all(0, 0, 0);
         }
     }
-  } else {
-    if (rgb_matrix_get_flags() == LED_FLAG_NONE) {
-      rgb_matrix_set_color_all(0, 0, 0);
-    }
-  }
-
-  return true;
+    return true;
 }
 
 extern bool set_scrolling;
